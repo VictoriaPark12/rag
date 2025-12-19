@@ -154,10 +154,41 @@ ENVEOF
   echo "📦 Installing other dependencies..."
   pip install -r app/requirements.txt
 
+  # systemd 서비스 파일 생성/업데이트
+  echo "⚙️ Creating/updating systemd service..."
+  CURRENT_USER=\$(whoami)
+  sudo tee /etc/systemd/system/langchain-backend.service > /dev/null << SERVICEEOF
+[Unit]
+Description=LangChain FastAPI Backend
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=\$CURRENT_USER
+Group=\$CURRENT_USER
+WorkingDirectory=$DEPLOY_PATH/app
+Environment="PATH=$DEPLOY_PATH/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile=$DEPLOY_PATH/.env
+ExecStart=$DEPLOY_PATH/venv/bin/python main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=langchain-backend
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+  # systemd 재로드 및 서비스 활성화
+  echo "⚙️ Reloading systemd and enabling service..."
+  sudo systemctl daemon-reload
+  sudo systemctl enable langchain-backend || true
+
   # systemd 서비스 재시작
   echo "♻️  Restarting langchain-backend service..."
-  sudo systemctl daemon-reload
-  sudo systemctl restart langchain-backend
+  sudo systemctl restart langchain-backend || sudo systemctl start langchain-backend
 
   # 헬스체크
   echo "⏳ Waiting for service to start..."
