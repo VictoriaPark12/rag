@@ -117,13 +117,10 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}  # 예: /opt/langchain
+          DEPLOY_PATH: /opt/langchain  # <-- Secrets 대신 직접 고정
         run: |
-          # DEPLOY_PATH 검증
-          if [ -z "$DEPLOY_PATH" ]; then
-            echo "❌ ERROR: DEPLOY_PATH secret is not set"
-            exit 1
-          fi
+          echo "Deploying to: $DEPLOY_PATH"
+          SSH_KEY_PATH=~/.ssh/deploy_key ./scripts/deploy_to_ec2.sh
 
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s << ENDSSH
             set -e
@@ -131,10 +128,11 @@ jobs:
             DEPLOY_PATH="$DEPLOY_PATH"
             echo "🚀 Starting deployment to: \$DEPLOY_PATH"
 
-            # 배포 디렉토리 확인 및 이동
+            # 배포 디렉토리 생성 (없으면 생성)
             if [ ! -d "\$DEPLOY_PATH" ]; then
-              echo "❌ ERROR: Deploy path does not exist: \$DEPLOY_PATH"
-              exit 1
+              echo "📁 Creating deploy directory: \$DEPLOY_PATH"
+              sudo mkdir -p "\$DEPLOY_PATH"
+              sudo chown \$USER:\$USER "\$DEPLOY_PATH"
             fi
             cd "\$DEPLOY_PATH"
             echo "📂 Current directory: \$(pwd)"
