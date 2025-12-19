@@ -226,6 +226,23 @@ SERVICEEOF
     sleep 2
   done
 
+  # 환경 변수 확인 (민감한 정보는 마스킹)
+  echo "🔍 Checking environment variables..."
+  if [ -f .env ]; then
+    if grep -q "OPENAI_API_KEY" .env; then
+      OPENAI_KEY_LENGTH=\$(grep "^OPENAI_API_KEY=" .env | cut -d'=' -f2 | wc -c)
+      if [ \$OPENAI_KEY_LENGTH -gt 10 ]; then
+        echo "✅ OPENAI_API_KEY is set (length: \$((OPENAI_KEY_LENGTH-1)) characters)"
+      else
+        echo "⚠️  OPENAI_API_KEY appears to be empty or too short"
+      fi
+    else
+      echo "⚠️  OPENAI_API_KEY not found in .env file"
+    fi
+  else
+    echo "⚠️  .env file not found"
+  fi
+
   echo "🎉 Deployment completed successfully!"
 ENDSSH
 
