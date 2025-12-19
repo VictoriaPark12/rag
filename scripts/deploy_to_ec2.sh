@@ -92,6 +92,8 @@ ENVEOF
 
   # Python 버전 확인 및 가상환경 생성
   echo "🐍 Checking Python version..."
+  PYTHON_CMD=""
+
   if command -v python3.11 &> /dev/null; then
     PYTHON_CMD=python3.11
   elif command -v python3.12 &> /dev/null; then
@@ -100,15 +102,17 @@ ENVEOF
     PYTHON_CMD=python3.10
   elif command -v python3 &> /dev/null; then
     PYTHON_CMD=python3
-  else
-    echo "❌ ERROR: Python 3 not found. Installing Python 3.11..."
+  fi
+
+  if [ -z "$PYTHON_CMD" ]; then
+    echo "❌ Python 3 not found. Installing Python 3.11..."
     sudo apt update
     sudo apt install -y python3.11 python3.11-venv python3-pip
     PYTHON_CMD=python3.11
   fi
 
   echo "✅ Using Python: $PYTHON_CMD"
-  $PYTHON_CMD --version
+  $PYTHON_CMD --version || echo "⚠️  Warning: Could not get Python version"
 
   # Python 가상환경 확인 및 생성
   if [ ! -d venv ]; then
