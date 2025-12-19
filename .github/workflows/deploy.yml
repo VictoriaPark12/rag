@@ -120,7 +120,8 @@ jobs:
           DEPLOY_PATH: /opt/langchain  # <-- Secrets 대신 직접 고정
         run: |
           echo "Deploying to: $DEPLOY_PATH"
-          SSH_KEY_PATH=~/.ssh/deploy_key ./scripts/deploy_to_ec2.sh
+          chmod +x scripts/deploy_to_ec2.sh
+          SSH_KEY_PATH=~/.ssh/deploy_key bash scripts/deploy_to_ec2.sh
 
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s << ENDSSH
             set -e
