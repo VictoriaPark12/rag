@@ -38,8 +38,9 @@ ssh -i "$SSH_KEY_PATH" "$EC2_USER@$EC2_HOST" << ENDSSH
 
   echo "📂 Navigating to deploy directory..."
   echo "Ensuring deploy directory exists: $DEPLOY_PATH"
+  CURRENT_USER=\$(whoami)
   sudo mkdir -p $DEPLOY_PATH
-  sudo chown $USER:$USER $DEPLOY_PATH
+  sudo chown \$CURRENT_USER:\$CURRENT_USER $DEPLOY_PATH
   cd $DEPLOY_PATH || {
     echo "❌ ERROR: Failed to change to directory: $DEPLOY_PATH"
     exit 1
