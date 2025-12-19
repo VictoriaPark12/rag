@@ -117,86 +117,11 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          DEPLOY_PATH: /opt/langchain  # <-- Secrets 대신 직접 고정
+          DEPLOY_PATH: /opt/langchain
         run: |
           echo "Deploying to: $DEPLOY_PATH"
           chmod +x scripts/deploy_to_ec2.sh
           SSH_KEY_PATH=~/.ssh/deploy_key bash scripts/deploy_to_ec2.sh
-
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s << ENDSSH
-            set -e
-
-            DEPLOY_PATH="$DEPLOY_PATH"
-            echo "🚀 Starting deployment to: \$DEPLOY_PATH"
-
-            # 배포 디렉토리 생성 (없으면 생성)
-            if [ ! -d "\$DEPLOY_PATH" ]; then
-              echo "📁 Creating deploy directory: \$DEPLOY_PATH"
-              sudo mkdir -p "\$DEPLOY_PATH"
-              sudo chown \$USER:\$USER "\$DEPLOY_PATH"
-            fi
-            cd "\$DEPLOY_PATH"
-            echo "📂 Current directory: \$(pwd)"
-
-            # 기존 변경사항 백업 (혹시 모를 경우)
-            git stash || true
-
-            # 최신 코드 pull (push: main, manual: 입력 ref)
-            REF="${{ github.event.inputs.git_ref }}"
-            if [ -z "$REF" ]; then REF="main"; fi
-            git fetch --all --tags
-            git checkout "$REF"
-            git pull origin "$REF" || true
-
-            # .env 파일 존재 확인 (없으면 에러)
-            if [ ! -f .env ]; then
-              echo "❌ ERROR: .env file not found!"
-              exit 1
-            fi
-
-            # Python 가상환경 확인 및 생성
-            if [ ! -d venv ]; then
-              echo "📦 Creating Python virtual environment..."
-              python3.11 -m venv venv
-            fi
-
-            # 가상환경 활성화 및 의존성 설치
-            echo "📦 Installing dependencies..."
-            source venv/bin/activate
-            pip install --upgrade pip
-            pip install -r app/requirements.txt
-
-            # systemd 서비스 재시작
-            echo "🔄 Restarting langchain-backend service..."
-            sudo systemctl daemon-reload
-            sudo systemctl restart langchain-backend
-
-            # 헬스체크 대기
-            echo "⏳ Waiting for service to be healthy..."
-            sleep 10
-
-            # 백엔드 상태 확인
-            if sudo systemctl is-active --quiet langchain-backend; then
-              echo "✅ Backend service is running"
-              sudo journalctl -u langchain-backend --no-pager -n 50
-            else
-              echo "❌ Backend service failed to start"
-              sudo journalctl -u langchain-backend --no-pager -n 100
-              exit 1
-            fi
-
-            # API 헬스체크
-            for i in {1..30}; do
-              if curl -f http://localhost:8000/docs > /dev/null 2>&1; then
-                echo "✅ API is healthy!"
-                break
-              fi
-              echo "⏳ Waiting for API... ($i/30)"
-              sleep 2
-            done
-
-            echo "🎉 Deployment completed successfully!"
-          ENDSSH
 
       - name: Notify deployment status
         if: always()
