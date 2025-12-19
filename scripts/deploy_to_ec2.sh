@@ -37,7 +37,22 @@ ssh -i "$SSH_KEY_PATH" "$EC2_USER@$EC2_HOST" << ENDSSH
   set -e
 
   echo "📂 Navigating to deploy directory..."
-  cd $DEPLOY_PATH
+  echo "Ensuring deploy directory exists: $DEPLOY_PATH"
+  sudo mkdir -p $DEPLOY_PATH
+  sudo chown $USER:$USER $DEPLOY_PATH
+  cd $DEPLOY_PATH || {
+    echo "❌ ERROR: Failed to change to directory: $DEPLOY_PATH"
+    exit 1
+  }
+
+  if [ -d ".git" ]; then
+    echo "🔄 Pulling latest changes from main..."
+    git fetch origin main
+    git reset --hard origin/main
+  else
+    echo "📥 First deployment: cloning repository..."
+    git clone https://github.com/VictoriaPark12/RAG.git .
+  fi
 
   # 백업 생성
   BACKUP_TAG="backup-\$(date +%Y%m%d-%H%M%S)"
@@ -111,12 +126,3 @@ else
   exit 1
 fi
 
-
-# FORCE COMMIT: deploy path mkdir added 12/19/2025 14:43:16
-echo 'Deploy path ensuring...'
-mkdir -p $DEPLOY_PATH
-
-# FORCE COMMIT: deploy path fix 2025-12-19 14:52
-echo '=== DEPLOY PATH FIX APPLIED ==='
-mkdir -p $DEPLOY_PATH
-# TEMP COMMIT TEST 12/19/2025 14:58:38
