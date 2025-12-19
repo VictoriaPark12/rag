@@ -111,3 +111,7 @@ else
   exit 1
 fi
 
+
+# FORCE COMMIT: deploy path mkdir added 12/19/2025 14:43:16
+echo 'Deploy path ensuring...'
+mkdir -p $DEPLOY_PATH
