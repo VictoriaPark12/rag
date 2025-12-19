@@ -90,10 +90,30 @@ ENVEOF
     echo "✅ .env file found"
   fi
 
-  # Python 가상환경 확인 및 의존성 설치
+  # Python 버전 확인 및 가상환경 생성
+  echo "🐍 Checking Python version..."
+  if command -v python3.11 &> /dev/null; then
+    PYTHON_CMD=python3.11
+  elif command -v python3.12 &> /dev/null; then
+    PYTHON_CMD=python3.12
+  elif command -v python3.10 &> /dev/null; then
+    PYTHON_CMD=python3.10
+  elif command -v python3 &> /dev/null; then
+    PYTHON_CMD=python3
+  else
+    echo "❌ ERROR: Python 3 not found. Installing Python 3.11..."
+    sudo apt update
+    sudo apt install -y python3.11 python3.11-venv python3-pip
+    PYTHON_CMD=python3.11
+  fi
+
+  echo "✅ Using Python: $PYTHON_CMD"
+  $PYTHON_CMD --version
+
+  # Python 가상환경 확인 및 생성
   if [ ! -d venv ]; then
     echo "🐍 Creating Python virtual environment..."
-    python3.11 -m venv venv
+    $PYTHON_CMD -m venv venv
   fi
 
   echo "📦 Installing/updating dependencies..."
