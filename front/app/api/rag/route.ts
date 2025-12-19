@@ -1,26 +1,36 @@
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
-  // Vercel 환경에서는 OpenAI 사용, 로컬에서는 백엔드(midm) 사용
-  const useOpenAI = process.env.VERCEL === "1" || process.env.USE_OPENAI === "true";
-  const openaiApiKey = process.env.OPENAI_API_KEY;
+  // RAG는 항상 백엔드로 연결 (벡터 스토어 필요)
+  let backendBaseUrl = process.env.BACKEND_BASE_URL ?? "http://localhost:8000";
+
+  // URL 끝의 슬래시 제거 (중복 방지)
+  backendBaseUrl = backendBaseUrl.replace(/\/+$/, "");
+
+  // 디버깅: 환경 변수 확인
+  console.log("[RAG] Backend URL:", backendBaseUrl);
+  console.log("[RAG] Environment variables:", {
+    BACKEND_BASE_URL: process.env.BACKEND_BASE_URL ? "SET" : "NOT SET",
+    VERCEL: process.env.VERCEL,
+  });
 
   const body = await req.text();
-  const requestData = JSON.parse(body);
-
-  // Vercel 환경에서 OpenAI 사용 (RAG는 백엔드 벡터 스토어 필요하므로 백엔드로 전달)
-  // RAG는 벡터 검색이 필요하므로 백엔드를 통해야 함
-  // 단, Vercel에서도 백엔드로 연결하도록 설정
-  const backendBaseUrl = process.env.BACKEND_BASE_URL ?? "http://localhost:8000";
 
   try {
+    // 타임아웃 설정 (30초)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     const upstream = await fetch(`${backendBaseUrl}/rag`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body,
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     const contentType = upstream.headers.get("content-type") ?? "application/json";
     const text = await upstream.text();
@@ -45,10 +55,13 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
-    console.error("Failed to connect to backend:", error);
+    console.error("[RAG] Failed to connect to backend:", error);
+    console.error("[RAG] Backend URL attempted:", backendBaseUrl);
+    console.error("[RAG] Error details:", error instanceof Error ? error.message : String(error));
+
     return new NextResponse(
       JSON.stringify({
-        detail: `Failed to connect to backend at ${backendBaseUrl}. Make sure the backend server is running.`,
+        detail: `Failed to connect to backend at ${backendBaseUrl}. Make sure the backend server is running and BACKEND_BASE_URL is set in Vercel environment variables.`,
       }),
       {
         status: 503,
