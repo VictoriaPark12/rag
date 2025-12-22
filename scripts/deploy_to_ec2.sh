@@ -46,24 +46,109 @@ ssh -i "$SSH_KEY_PATH" "$EC2_USER@$EC2_HOST" << ENDSSH
     exit 1
   }
 
+  # 디스크 공간 정리 (Git pull 전에 먼저 실행)
+  echo "🧹 Cleaning up disk space before Git operations..."
+  
+  # 디스크 사용률 확인
+  DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+  echo "💾 Current disk usage: \${DISK_USAGE}%"
+  
+  if [ "\$DISK_USAGE" -gt 80 ]; then
+    echo "⚠️  Disk usage is high (\${DISK_USAGE}%). Performing aggressive cleanup..."
+    
+    # apt 캐시 정리
+    echo "🧹 Cleaning apt cache..."
+    sudo apt clean 2>/dev/null || true
+    sudo apt autoclean 2>/dev/null || true
+    
+    # 패키지 목록 캐시 정리
+    echo "🧹 Cleaning package lists..."
+    sudo rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+    sudo mkdir -p /var/lib/apt/lists/partial 2>/dev/null || true
+    
+    # 임시 파일 정리
+    echo "🧹 Cleaning temporary files..."
+    sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+    
+    # 오래된 로그 파일 정리
+    echo "🧹 Cleaning old log files..."
+    sudo journalctl --vacuum-time=3d 2>/dev/null || true
+    sudo find /var/log -type f -name "*.log" -mtime +7 -delete 2>/dev/null || true
+    sudo find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
+    
+    # 오래된 백업 파일 정리 (7일 이상 된 백업)
+    if [ -d "$DEPLOY_PATH" ]; then
+      echo "🧹 Cleaning old backups..."
+      find $DEPLOY_PATH -name "backup-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+      # Git 객체 캐시 정리 (안전하게)
+      if [ -d "$DEPLOY_PATH/.git/objects" ]; then
+        echo "🧹 Cleaning Git object cache..."
+        cd $DEPLOY_PATH
+        git gc --prune=now --aggressive 2>/dev/null || true
+      fi
+    fi
+    
+    # 사용하지 않는 패키지 제거
+    echo "🧹 Removing unused packages..."
+    sudo apt autoremove -y 2>/dev/null || true
+    
+    # 디스크 공간 재확인
+    DISK_USAGE_AFTER=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+    echo "💾 Disk usage after cleanup: \${DISK_USAGE_AFTER}%"
+    
+    if [ "\$DISK_USAGE_AFTER" -gt 95 ]; then
+      echo "❌ ERROR: Disk space is still critically low (\${DISK_USAGE_AFTER}%)"
+      echo "Please manually free up disk space on the EC2 instance"
+      df -h /
+      echo "💡 Tip: Run 'bash scripts/free_disk_space.sh' or manually clean up files"
+      exit 1
+    fi
+  else
+    # 기본 정리만 수행
+    sudo apt clean 2>/dev/null || true
+    sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+  fi
+
+  # Git 작업 전 디렉토리로 이동
+  cd $DEPLOY_PATH || {
+    echo "❌ ERROR: Failed to change to directory: $DEPLOY_PATH"
+    exit 1
+  }
+
   if [ -d ".git" ]; then
     echo "🔄 Pulling latest changes from main..."
-    git fetch origin main
-    git reset --hard origin/main
+    # 디스크 공간 재확인
+    DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+    if [ "\$DISK_USAGE" -gt 95 ]; then
+      echo "⚠️  WARNING: Disk usage is very high (\${DISK_USAGE}%). Git pull may fail."
+      echo "Skipping Git pull and using existing code..."
+    else
+      git fetch origin main || {
+        echo "⚠️  Git fetch failed, trying to continue with existing code..."
+        git reset --hard HEAD 2>/dev/null || true
+      }
+      git reset --hard origin/main || {
+        echo "⚠️  Git reset failed, using current HEAD..."
+      }
+    fi
   else
     echo "📥 First deployment: cloning repository..."
+    # 디스크 공간 확인
+    DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+    if [ "\$DISK_USAGE" -gt 90 ]; then
+      echo "❌ ERROR: Cannot clone repository - disk space too low (\${DISK_USAGE}%)"
+      df -h /
+      exit 1
+    fi
     git clone https://github.com/VictoriaPark12/RAG.git .
   fi
 
-  # 백업 생성
-  BACKUP_TAG="backup-\$(date +%Y%m%d-%H%M%S)"
-  echo "💾 Creating backup: \$BACKUP_TAG"
-  git tag \$BACKUP_TAG 2>/dev/null || true
-
-  # 최신 코드 pull
-  echo "🔄 Pulling latest changes..."
-  git fetch origin main
-  git reset --hard origin/main
+  # 백업 생성 (Git pull 성공 후)
+  if [ -d ".git" ]; then
+    BACKUP_TAG="backup-\$(date +%Y%m%d-%H%M%S)"
+    echo "💾 Creating backup tag: \$BACKUP_TAG"
+    git tag \$BACKUP_TAG 2>/dev/null || true
+  fi
 
   # openai 폴더 확인 (필수)
   echo "🔍 Verifying openai folder..."
@@ -123,55 +208,16 @@ ENVEOF
     echo "✅ Disabled QLoRA/midm model in .env"
   fi
 
-  # 디스크 공간 정리 (Python 설치 전에 먼저 실행)
-  echo "🧹 Cleaning up disk space before Python installation..."
-  
-  # 디스크 사용률 확인
+  # Python 설치 전 디스크 공간 확인 (이미 정리는 Git pull 전에 수행됨)
+  echo "💾 Checking disk space before Python installation..."
   DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
   echo "💾 Current disk usage: \${DISK_USAGE}%"
   
-  if [ "\$DISK_USAGE" -gt 80 ]; then
-    echo "⚠️  Disk usage is high (\${DISK_USAGE}%). Performing aggressive cleanup..."
-    
-    # apt 캐시 정리
-    echo "🧹 Cleaning apt cache..."
-    sudo apt clean 2>/dev/null || true
-    sudo apt autoclean 2>/dev/null || true
-    
-    # 임시 파일 정리
-    echo "🧹 Cleaning temporary files..."
-    sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
-    
-    # 오래된 로그 파일 정리
-    echo "🧹 Cleaning old log files..."
-    sudo journalctl --vacuum-time=3d 2>/dev/null || true
-    sudo find /var/log -type f -name "*.log" -mtime +7 -delete 2>/dev/null || true
-    sudo find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
-    
-    # 오래된 백업 파일 정리 (7일 이상 된 백업)
-    if [ -d "$DEPLOY_PATH" ]; then
-      echo "🧹 Cleaning old backups..."
-      find $DEPLOY_PATH -name "backup-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
-    fi
-    
-    # 패키지 목록 캐시 정리
-    echo "🧹 Cleaning package lists..."
-    sudo rm -rf /var/lib/apt/lists/* 2>/dev/null || true
-    
-    # 디스크 공간 재확인
-    DISK_USAGE_AFTER=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
-    echo "💾 Disk usage after cleanup: \${DISK_USAGE_AFTER}%"
-    
-    if [ "\$DISK_USAGE_AFTER" -gt 95 ]; then
-      echo "❌ ERROR: Disk space is still critically low (\${DISK_USAGE_AFTER}%)"
-      echo "Please manually free up disk space on the EC2 instance"
-      df -h /
-      exit 1
-    fi
-  else
-    # 기본 정리만 수행
-    sudo apt clean 2>/dev/null || true
-    sudo rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+  if [ "\$DISK_USAGE" -gt 95 ]; then
+    echo "❌ ERROR: Disk space is critically low (\${DISK_USAGE}%)"
+    echo "Cannot proceed with Python installation"
+    df -h /
+    exit 1
   fi
 
   # Python 버전 확인 및 가상환경 생성
