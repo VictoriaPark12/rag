@@ -397,14 +397,75 @@ SERVICEEOF
 
   # API 헬스체크
   echo "🔍 Checking API health..."
+  
+  # 포트 바인딩 확인
+  echo "🔍 Checking if port 8000 is listening..."
+  if netstat -tuln 2>/dev/null | grep -q ":8000 " || ss -tuln 2>/dev/null | grep -q ":8000 "; then
+    echo "✅ Port 8000 is listening"
+  else
+    echo "⚠️  Port 8000 is not listening"
+  fi
+  
+  # API 헬스체크 시도
+  API_HEALTHY=false
   for i in {1..30}; do
-    if curl -f http://localhost:8000/docs > /dev/null 2>&1; then
-      echo "✅ API is healthy!"
+    # 여러 엔드포인트 시도
+    if curl -f -s http://localhost:8000/docs > /dev/null 2>&1; then
+      echo "✅ API is healthy! (docs endpoint)"
+      API_HEALTHY=true
+      break
+    elif curl -f -s http://localhost:8000/health > /dev/null 2>&1; then
+      echo "✅ API is healthy! (health endpoint)"
+      API_HEALTHY=true
+      break
+    elif curl -f -s http://localhost:8000/ > /dev/null 2>&1; then
+      echo "✅ API is responding! (root endpoint)"
+      API_HEALTHY=true
       break
     fi
+    
     if [ \$i -eq 30 ]; then
-      echo "❌ API health check failed"
+      echo "❌ API health check failed after 60 seconds"
+      echo ""
+      echo "📋 Diagnostic information:"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      
+      # 서비스 상태
+      echo "1. Service status:"
+      sudo systemctl status langchain-backend --no-pager -l || true
+      echo ""
+      
+      # 포트 확인
+      echo "2. Port 8000 binding:"
+      (netstat -tuln 2>/dev/null | grep ":8000 ") || (ss -tuln 2>/dev/null | grep ":8000 ") || echo "  Port 8000 not found"
+      echo ""
+      
+      # 프로세스 확인
+      echo "3. Python processes:"
+      ps aux | grep -E "python.*main.py|uvicorn" | grep -v grep || echo "  No Python process found"
+      echo ""
+      
+      # 최근 로그
+      echo "4. Recent service logs (last 50 lines):"
       sudo journalctl -u langchain-backend --no-pager -n 50
+      echo ""
+      
+      # curl 오류 상세
+      echo "5. Curl test results:"
+      echo "  Testing /docs:"
+      curl -v http://localhost:8000/docs 2>&1 | head -20 || echo "  Failed"
+      echo ""
+      echo "  Testing /health:"
+      curl -v http://localhost:8000/health 2>&1 | head -20 || echo "  Failed"
+      echo ""
+      
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "💡 Troubleshooting tips:"
+      echo "  1. Check if OPENAI_API_KEY is set in .env file"
+      echo "  2. Check service logs: sudo journalctl -u langchain-backend -f"
+      echo "  3. Check if port 8000 is open in EC2 security group"
+      echo "  4. Try restarting service: sudo systemctl restart langchain-backend"
+      
       exit 1
     fi
     echo "⏳ Waiting for API... (\$i/30)"
