@@ -95,21 +95,47 @@ def init_llm() -> Union[HuggingFacePipeline, Any]:
 
     # Try OpenAI first if specified (uses openai folder)
     if llm_provider == "openai":
-        print("Using OpenAI for LLM...")
+        print("[OPENAI] Using OpenAI for LLM...")
         try:
-            # openai 폴더에서 모듈 import
-            import sys
-            from pathlib import Path
-            repo_root = Path(__file__).parent.parent.parent.parent
-            openai_path = repo_root / "openai"
-            if openai_path.exists() and str(openai_path) not in sys.path:
-                sys.path.insert(0, str(openai_path))
-            from app.core.llm.openai import init_openai_llm  # type: ignore
+            # PYTHONPATH에 openai 폴더가 이미 추가되어 있을 수 있음
+            # 먼저 직접 import 시도
+            try:
+                from app.core.llm.openai import init_openai_llm  # type: ignore
+                print("[OPENAI] Successfully imported init_openai_llm from PYTHONPATH")
+            except ImportError:
+                # PYTHONPATH에 없으면 수동으로 추가
+                import sys
+                from pathlib import Path
+
+                # 현재 파일 위치에서 repo root 찾기
+                # midm/app/core/rag_chain.py -> ../../.. -> repo root
+                current_file = Path(__file__)
+                repo_root = current_file.parent.parent.parent.parent
+                openai_path = repo_root / "openai"
+
+                print(f"[OPENAI] Looking for openai folder at: {openai_path}")
+                print(f"[OPENAI] openai_path exists: {openai_path.exists()}")
+
+                if openai_path.exists():
+                    openai_path_str = str(openai_path.resolve())
+                    if openai_path_str not in sys.path:
+                        sys.path.insert(0, openai_path_str)
+                        print(f"[OPENAI] Added to Python path: {openai_path_str}")
+
+                    # 다시 import 시도
+                    from app.core.llm.openai import init_openai_llm  # type: ignore
+                    print("[OPENAI] Successfully imported init_openai_llm after adding to path")
+                else:
+                    raise FileNotFoundError(f"openai folder not found at {openai_path}")
+
+            # OpenAI LLM 초기화
+            print("[OPENAI] Initializing OpenAI LLM...")
             return init_openai_llm()
-        except (ModuleNotFoundError, RuntimeError, ImportError) as e:
-            print(f"[WARNING] Failed to initialize OpenAI: {e}")
-            print("[INFO] Falling back to HuggingFace transformers...")
-            # Fall through to HuggingFace
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize OpenAI: {e}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"OpenAI initialization failed: {e}. Please check OPENAI_API_KEY and openai folder.") from e
 
     # Try Ollama if specified
     if llm_provider == "ollama":
