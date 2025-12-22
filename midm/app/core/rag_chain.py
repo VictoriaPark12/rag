@@ -101,7 +101,6 @@ def init_llm() -> Union[HuggingFacePipeline, Any]:
             # 먼저 직접 import 시도
             import sys
             from pathlib import Path
-            import os
 
             # 디버깅: 현재 PYTHONPATH 확인
             print(f"[OPENAI] Current PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
