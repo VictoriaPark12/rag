@@ -103,30 +103,45 @@ def init_llm() -> Union[HuggingFacePipeline, Any]:
             from pathlib import Path
 
             # 중요: 실제 openai 패키지를 먼저 import하여 sys.modules에 등록
-            # openai 폴더가 PYTHONPATH에 있으면 이름 충돌이 발생할 수 있으므로
-            # 임시로 제거하고 실제 패키지를 먼저 로드
-            openai_folder_paths = [p for p in sys.path if 'openai' in p and os.path.isdir(p) and os.path.basename(p) == 'openai']
-            temp_removed_paths = []
-            
-            # openai 폴더를 임시로 제거
-            for path in openai_folder_paths:
-                if path in sys.path:
-                    sys.path.remove(path)
-                    temp_removed_paths.append(path)
-                    print(f"[OPENAI] Temporarily removed from sys.path: {path}")
-            
+            # openai 폴더가 PYTHONPATH에 있어도, 실제 패키지를 먼저 로드하면
+            # sys.modules에 등록되어 나중에 openai 폴더를 추가해도 실제 패키지가 사용됨
+            # site-packages에서 직접 찾아서 로드
             try:
-                # 실제 openai 패키지와 langchain_openai를 먼저 import
-                import openai as openai_package
-                print(f"[OPENAI] Pre-loaded openai package: {getattr(openai_package, '__file__', 'unknown')}")
+                import importlib.util
+                import site
                 
-                # openai 패키지가 제대로 로드되었는지 확인
-                if hasattr(openai_package, 'DefaultHttpxClient'):
-                    print("[OPENAI] openai package has DefaultHttpxClient attribute ✓")
-                else:
-                    print("[OPENAI] WARNING: openai package does not have DefaultHttpxClient")
+                # site-packages에서 openai 패키지 찾기
+                openai_package_loaded = False
+                for site_package in site.getsitepackages():
+                    openai_init = Path(site_package) / "openai" / "__init__.py"
+                    if openai_init.exists():
+                        # site-packages의 openai를 직접 import
+                        spec = importlib.util.spec_from_file_location(
+                            "openai", openai_init
+                        )
+                        if spec and spec.loader:
+                            # sys.modules에 강제로 등록
+                            openai_module = importlib.util.module_from_spec(spec)
+                            sys.modules['openai'] = openai_module
+                            spec.loader.exec_module(openai_module)
+                            print(f"[OPENAI] Pre-loaded openai package from: {openai_init.parent}")
+                            
+                            if hasattr(openai_module, 'DefaultHttpxClient'):
+                                print("[OPENAI] openai package has DefaultHttpxClient attribute ✓")
+                            else:
+                                print("[OPENAI] WARNING: openai package does not have DefaultHttpxClient")
+                            
+                            openai_package_loaded = True
+                            break
                 
-                # langchain_openai도 미리 import하여 openai 패키지 의존성 확보
+                if not openai_package_loaded:
+                    # 일반적인 방법으로 시도
+                    import openai
+                    print(f"[OPENAI] Pre-loaded openai package: {getattr(openai, '__file__', 'unknown')}")
+                    if hasattr(openai, 'DefaultHttpxClient'):
+                        print("[OPENAI] openai package has DefaultHttpxClient attribute ✓")
+                
+                # langchain_openai도 미리 import
                 try:
                     from langchain_openai import ChatOpenAI
                     print("[OPENAI] Pre-loaded langchain_openai successfully ✓")
@@ -134,13 +149,10 @@ def init_llm() -> Union[HuggingFacePipeline, Any]:
                     print(f"[OPENAI] WARNING: Could not pre-load langchain_openai: {e}")
                     import traceback
                     traceback.print_exc()
-            except ImportError as e:
+            except Exception as e:
                 print(f"[OPENAI] WARNING: Could not pre-load openai package: {e}")
-            finally:
-                # openai 폴더를 다시 추가 (app.core.llm.openai import를 위해)
-                for path in temp_removed_paths:
-                    sys.path.append(path)  # 끝에 추가하여 실제 패키지가 우선되도록
-                    print(f"[OPENAI] Re-added to sys.path (appended): {path}")
+                import traceback
+                traceback.print_exc()
 
             # 디버깅: 현재 PYTHONPATH 확인
             print(f"[OPENAI] Current PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
