@@ -208,6 +208,36 @@ ENVEOF
     echo "✅ Disabled QLoRA/midm model in .env"
   fi
 
+  # .env 파일에 OPENAI_API_KEY 확인 및 경고
+  echo "🔍 Checking OPENAI_API_KEY in .env file..."
+  if [ -f .env ]; then
+    # 주석이 아닌 OPENAI_API_KEY 라인 찾기
+    OPENAI_KEY_LINE=\$(grep -E "^[^#]*OPENAI_API_KEY=" .env | head -1)
+    if [ -n "\$OPENAI_KEY_LINE" ]; then
+      OPENAI_KEY_VALUE=\$(echo "\$OPENAI_KEY_LINE" | cut -d'=' -f2- | tr -d ' ')
+      if [ -n "\$OPENAI_KEY_VALUE" ] && [ "\$OPENAI_KEY_VALUE" != "your_openai_api_key_here" ]; then
+        OPENAI_KEY_LENGTH=\$(echo -n "\$OPENAI_KEY_VALUE" | wc -c)
+        if [ \$OPENAI_KEY_LENGTH -gt 10 ]; then
+          echo "✅ OPENAI_API_KEY is set in .env file (length: \$OPENAI_KEY_LENGTH characters)"
+        else
+          echo "⚠️  WARNING: OPENAI_API_KEY in .env appears to be too short (length: \$OPENAI_KEY_LENGTH)"
+          echo "⚠️  Please set a valid OPENAI_API_KEY in $DEPLOY_PATH/.env"
+        fi
+      else
+        echo "⚠️  WARNING: OPENAI_API_KEY is set but appears to be empty or placeholder"
+        echo "⚠️  Please set a valid OPENAI_API_KEY in $DEPLOY_PATH/.env"
+        echo "⚠️  Example: OPENAI_API_KEY=sk-..."
+      fi
+    else
+      echo "⚠️  WARNING: OPENAI_API_KEY not found in .env file"
+      echo "⚠️  Please add OPENAI_API_KEY to $DEPLOY_PATH/.env"
+      echo "⚠️  Example: OPENAI_API_KEY=sk-..."
+    fi
+  else
+    echo "⚠️  WARNING: .env file not found at $DEPLOY_PATH/.env"
+    echo "⚠️  Creating .env file template..."
+  fi
+
   # Python 설치 전 디스크 공간 확인 (이미 정리는 Git pull 전에 수행됨)
   echo "💾 Checking disk space before Python installation..."
   DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
