@@ -158,80 +158,81 @@ def init_llm() -> Union[HuggingFacePipeline, Any]:
             print(f"[OPENAI] Current PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
             print(f"[OPENAI] sys.path: {sys.path[:5]}...")  # 처음 5개만 출력
 
-            try:
-                from app.core.llm.openai import init_openai_llm  # type: ignore
-                print("[OPENAI] Successfully imported init_openai_llm from PYTHONPATH")
-            except ImportError as import_error:
-                print(f"[OPENAI] Import failed: {import_error}")
-                print("[OPENAI] Attempting to find and add openai folder to sys.path...")
-
-                # 여러 방법으로 repo root 찾기
-                repo_root = None
-                
-                # 방법 1: 현재 파일 위치에서 계산
-                current_file = Path(__file__).resolve()
-                # midm/app/core/rag_chain.py -> ../../.. -> repo root
-                potential_root = current_file.parent.parent.parent.parent
+            # 여러 방법으로 repo root 찾기
+            repo_root = None
+            current_file = Path(__file__).resolve()
+            
+            # 방법 1: 현재 파일 위치에서 계산
+            # midm/app/core/rag_chain.py -> ../../.. -> repo root
+            potential_root = current_file.parent.parent.parent.parent
+            if (potential_root / "openai").exists():
+                repo_root = potential_root
+                print(f"[OPENAI] Found repo root via file path: {repo_root}")
+            
+            # 방법 2: 현재 작업 디렉토리에서 찾기
+            if repo_root is None:
+                cwd = Path(os.getcwd()).resolve()
+                # WorkingDirectory가 midm/app이므로, ../../ -> repo root
+                potential_root = cwd.parent.parent
                 if (potential_root / "openai").exists():
                     repo_root = potential_root
-                    print(f"[OPENAI] Found repo root via file path: {repo_root}")
-                
-                # 방법 2: 현재 작업 디렉토리에서 찾기
-                if repo_root is None:
-                    cwd = Path(os.getcwd()).resolve()
-                    # WorkingDirectory가 midm/app이므로, ../../ -> repo root
-                    potential_root = cwd.parent.parent
-                    if (potential_root / "openai").exists():
-                        repo_root = potential_root
-                        print(f"[OPENAI] Found repo root via CWD: {repo_root}")
-                
-                # 방법 3: 환경 변수에서 찾기
-                if repo_root is None:
-                    deploy_path = os.environ.get("DEPLOY_PATH", "/opt/langchain")
-                    potential_root = Path(deploy_path)
-                    if (potential_root / "openai").exists():
-                        repo_root = potential_root
-                        print(f"[OPENAI] Found repo root via DEPLOY_PATH: {repo_root}")
-                
-                if repo_root is None:
-                    raise FileNotFoundError(
-                        f"Could not find repo root. Tried:\n"
-                        f"  - {current_file.parent.parent.parent.parent}\n"
-                        f"  - {Path(os.getcwd()).parent.parent}\n"
-                        f"  - {os.environ.get('DEPLOY_PATH', '/opt/langchain')}"
-                    )
+                    print(f"[OPENAI] Found repo root via CWD: {repo_root}")
+            
+            # 방법 3: 환경 변수에서 찾기
+            if repo_root is None:
+                deploy_path = os.environ.get("DEPLOY_PATH", "/opt/langchain")
+                potential_root = Path(deploy_path)
+                if (potential_root / "openai").exists():
+                    repo_root = potential_root
+                    print(f"[OPENAI] Found repo root via DEPLOY_PATH: {repo_root}")
+            
+            if repo_root is None:
+                raise FileNotFoundError(
+                    f"Could not find repo root. Tried:\n"
+                    f"  - {current_file.parent.parent.parent.parent}\n"
+                    f"  - {Path(os.getcwd()).parent.parent}\n"
+                    f"  - {os.environ.get('DEPLOY_PATH', '/opt/langchain')}"
+                )
 
-                openai_path = repo_root / "openai"
-                print(f"[OPENAI] Looking for openai folder at: {openai_path}")
-                print(f"[OPENAI] openai_path exists: {openai_path.exists()}")
-                
-                if not openai_path.exists():
-                    raise FileNotFoundError(f"openai folder not found at {openai_path}")
+            openai_path = repo_root / "openai"
+            openai_module_path = openai_path / "app" / "core" / "llm" / "openai.py"
+            
+            print(f"[OPENAI] Looking for openai module at: {openai_module_path}")
+            print(f"[OPENAI] openai_module_path exists: {openai_module_path.exists()}")
+            
+            if not openai_module_path.exists():
+                raise FileNotFoundError(f"openai module not found at {openai_module_path}")
 
-                # openai 폴더를 sys.path에 추가
-                # 주의: 실제 openai 패키지가 이미 로드되었는지 확인
+            # importlib를 사용하여 직접 모듈 로드
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    "openai_app_core_llm_openai", openai_module_path
+                )
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"Could not create spec for {openai_module_path}")
+                
+                openai_module = importlib.util.module_from_spec(spec)
+                # openai 폴더를 sys.path에 추가하여 상대 import가 작동하도록
                 openai_path_str = str(openai_path.resolve())
                 if openai_path_str not in sys.path:
-                    # 실제 openai 패키지가 이미 로드되었는지 확인
-                    if 'openai' in sys.modules:
-                        openai_module = sys.modules['openai']
-                        print(f"[OPENAI] openai package already loaded from: {getattr(openai_module, '__file__', 'unknown')}")
-                    # openai 폴더를 sys.path 끝에 추가 (실제 패키지가 우선되도록)
-                    sys.path.append(openai_path_str)
-                    print(f"[OPENAI] Added to Python path (appended): {openai_path_str}")
+                    sys.path.insert(0, openai_path_str)
+                    print(f"[OPENAI] Added openai folder to sys.path: {openai_path_str}")
                 
-                # openai/app/__init__.py 확인
-                app_init = openai_path / "app" / "__init__.py"
-                print(f"[OPENAI] Checking app/__init__.py: {app_init.exists()}")
+                # 모듈 실행
+                spec.loader.exec_module(openai_module)
+                print("[OPENAI] Successfully loaded openai module")
                 
-                # 다시 import 시도
-                try:
-                    from app.core.llm.openai import init_openai_llm  # type: ignore
-                    print("[OPENAI] Successfully imported init_openai_llm after adding to path")
-                except ImportError as retry_error:
-                    print(f"[OPENAI] Import still failed after adding path: {retry_error}")
-                    print(f"[OPENAI] sys.path now: {sys.path[:5]}...")
-                    raise
+                # init_openai_llm 함수 가져오기
+                init_openai_llm = getattr(openai_module, 'init_openai_llm', None)
+                if init_openai_llm is None:
+                    raise AttributeError("init_openai_llm function not found in openai module")
+                
+                print("[OPENAI] Successfully imported init_openai_llm function")
+            except Exception as import_error:
+                print(f"[OPENAI] Failed to load openai module: {import_error}")
+                import traceback
+                traceback.print_exc()
+                raise
 
             # OpenAI LLM 초기화
             print("[OPENAI] Initializing OpenAI LLM...")
