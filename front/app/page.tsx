@@ -59,31 +59,31 @@ export default function Home() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000);
 
-      const res =
-        mode === "rag"
-          ? await fetch("/api/rag", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                question: query,
-                k: 3,
-                conversation_history: conversationHistory,
-              }),
-              signal: controller.signal,
-            })
-          : await fetch("/api/chat", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                message: query,
-                conversation_history: conversationHistory,
-              }),
-              signal: controller.signal,
-            });
+      // 백엔드 URL 설정 (환경 변수 또는 fallback)
+      // NEXT_PUBLIC_ 접두사가 있어야 클라이언트에서 접근 가능
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://ec2-13-124-217-222.ap-northeast-2.compute.amazonaws.com:8000";
+      const endpoint = mode === "rag" ? "/rag" : "/chat";
+      const requestBody = mode === "rag"
+        ? {
+            question: query,
+            k: 3,
+            conversation_history: conversationHistory,
+          }
+        : {
+            message: query,
+            conversation_history: conversationHistory,
+          };
+
+      console.log(`[CLIENT] Calling backend directly: ${backendUrl}${endpoint}`);
+
+      const res = await fetch(`${backendUrl}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
 
       clearTimeout(timeoutId);
       console.log("Response status:", res.status);
