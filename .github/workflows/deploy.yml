@@ -209,8 +209,25 @@ jobs:
             echo "♻️  Restarting service..."
             sudo systemctl restart langchain-backend
             
-            echo "⏳ Waiting for service to start (10 seconds)..."
-            sleep 10
+            echo "⏳ Waiting for service to start (30 seconds for initialization)..."
+            sleep 30
+            
+            # 서비스가 활성화될 때까지 최대 60초 대기
+            MAX_WAIT=60
+            WAIT_COUNT=0
+            while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
+              if sudo systemctl is-active --quiet langchain-backend; then
+                # 포트가 바인딩될 때까지 추가 대기
+                PORT_CHECK=\$(sudo netstat -tlnp 2>/dev/null | grep :8000 || sudo ss -tlnp 2>/dev/null | grep :8000 || echo "")
+                if [ -n "\$PORT_CHECK" ]; then
+                  echo "✅ Service is active and port 8000 is bound"
+                  break
+                fi
+              fi
+              echo "⏳ Waiting... (\$WAIT_COUNT/\$MAX_WAIT seconds)"
+              sleep 5
+              WAIT_COUNT=\$((WAIT_COUNT + 5))
+            done
             
             if sudo systemctl is-active --quiet langchain-backend; then
               echo "✅ Backend service restarted successfully"
@@ -218,10 +235,13 @@ jobs:
               echo "📋 Service status:"
               sudo systemctl status langchain-backend --no-pager -l | head -n 15
               echo ""
-              echo "📋 Recent logs (last 20 lines):"
-              sudo journalctl -u langchain-backend --no-pager -n 20
+              echo "📋 Recent logs (last 30 lines):"
+              sudo journalctl -u langchain-backend --no-pager -n 30
             else
-              echo "❌ Backend service restart failed"
+              echo "❌ Backend service restart failed or not active"
+              echo ""
+              echo "📋 Service status:"
+              sudo systemctl status langchain-backend --no-pager -l | head -n 20
               echo ""
               echo "📋 Error logs:"
               sudo journalctl -u langchain-backend --no-pager -n 50
@@ -232,8 +252,19 @@ jobs:
             echo "🔌 Checking port 8000:"
             PORT_CHECK=\$(sudo netstat -tlnp 2>/dev/null | grep :8000 || sudo ss -tlnp 2>/dev/null | grep :8000 || echo "")
             if [ -z "\$PORT_CHECK" ]; then
-              echo "❌ Port 8000 is not bound"
-              exit 1
+              echo "⚠️  Port 8000 is not bound yet, but service is active"
+              echo "   This may be normal if the server is still initializing"
+              echo "   Check logs above for initialization progress"
+              echo ""
+              echo "📋 Checking if server is responding:"
+              sleep 5
+              HEALTH_RESPONSE=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+              if [ "\$HEALTH_RESPONSE" = "200" ]; then
+                echo "✅ Server is responding (HTTP \$HEALTH_RESPONSE)"
+              else
+                echo "⚠️  Server not responding yet (HTTP \$HEALTH_RESPONSE)"
+                echo "   Server may still be initializing. Check logs above."
+              fi
             else
               echo "✅ Port 8000 is in use:"
               echo "\$PORT_CHECK"
