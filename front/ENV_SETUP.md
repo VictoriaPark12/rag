@@ -29,11 +29,12 @@
    Environments: Production, Preview, Development 모두 체크
    ```
 
-   #### 백엔드 연결 (RAG용)
+   #### 백엔드 연결 (필수)
    ```
    Key: BACKEND_BASE_URL
-   Value: http://ec2-3-39-187-108.ap-northeast-2.compute.amazonaws.com:8000
+   Value: http://ec2-13-209-75-64.ap-northeast-2.compute.amazonaws.com:8000
    Environments: Production, Preview, Development 모두 체크
+   Note: EC2 백엔드 서버 주소 (포트 8000)
    ```
 
 3. **Save** 클릭
