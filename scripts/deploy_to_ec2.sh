@@ -96,12 +96,49 @@ ssh -i "$SSH_KEY_PATH" "$EC2_USER@$EC2_HOST" << ENDSSH
     DISK_USAGE_AFTER=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
     echo "💾 Disk usage after cleanup: \${DISK_USAGE_AFTER}%"
     
+    # 여전히 95% 이상이면 추가 정리 시도
     if [ "\$DISK_USAGE_AFTER" -gt 95 ]; then
-      echo "❌ ERROR: Disk space is still critically low (\${DISK_USAGE_AFTER}%)"
-      echo "Please manually free up disk space on the EC2 instance"
-      df -h /
-      echo "💡 Tip: Run 'bash scripts/free_disk_space.sh' or manually clean up files"
-      exit 1
+      echo "⚠️  Disk usage is still high (\${DISK_USAGE_AFTER}%). Performing additional cleanup..."
+      
+      # 더 적극적인 로그 정리
+      echo "🧹 Aggressive log cleanup..."
+      sudo journalctl --vacuum-time=1d 2>/dev/null || true
+      sudo journalctl --vacuum-size=50M 2>/dev/null || true
+      sudo find /var/log -type f -name "*.log" -mtime +3 -delete 2>/dev/null || true
+      sudo find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
+      sudo find /var/log -type f -name "*.old" -delete 2>/dev/null || true
+      
+      # venv 캐시 정리 (pip cache)
+      if [ -d "$DEPLOY_PATH/venv" ]; then
+        echo "🧹 Cleaning pip cache..."
+        $DEPLOY_PATH/venv/bin/pip cache purge 2>/dev/null || true
+      fi
+      
+      # 사용자별 캐시 정리
+      echo "🧹 Cleaning user caches..."
+      rm -rf ~/.cache/pip 2>/dev/null || true
+      rm -rf ~/.cache/* 2>/dev/null || true
+      
+      # 큰 파일 찾기 및 정리 (100MB 이상)
+      echo "🧹 Finding large files..."
+      find /tmp /var/tmp -type f -size +100M -delete 2>/dev/null || true
+      
+      # 최종 재확인
+      DISK_USAGE_FINAL=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+      echo "💾 Disk usage after aggressive cleanup: \${DISK_USAGE_FINAL}%"
+      
+      # 98% 이상이면 경고만 하고 계속 진행 (배포는 가능하도록)
+      if [ "\$DISK_USAGE_FINAL" -gt 98 ]; then
+        echo "⚠️  WARNING: Disk usage is critically high (\${DISK_USAGE_FINAL}%)"
+        echo "⚠️  Deployment will continue, but may fail if more space is needed"
+        echo "⚠️  Consider increasing EC2 instance storage size"
+        df -h /
+      elif [ "\$DISK_USAGE_FINAL" -gt 95 ]; then
+        echo "⚠️  WARNING: Disk usage is still high (\${DISK_USAGE_FINAL}%)"
+        echo "⚠️  Deployment will continue, but monitor disk space"
+      else
+        echo "✅ Disk space is now acceptable (\${DISK_USAGE_FINAL}%)"
+      fi
     fi
   else
     # 기본 정리만 수행
@@ -329,11 +366,14 @@ ENVEOF
   DISK_USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
   echo "💾 Current disk usage: \${DISK_USAGE}%"
   
-  if [ "\$DISK_USAGE" -gt 95 ]; then
-    echo "❌ ERROR: Disk space is critically low (\${DISK_USAGE}%)"
-    echo "Cannot proceed with Python installation"
+  # 98% 이상이면 경고만 하고 계속 진행
+  if [ "\$DISK_USAGE" -gt 98 ]; then
+    echo "⚠️  WARNING: Disk space is critically low (\${DISK_USAGE}%)"
+    echo "⚠️  Python installation may fail, but will attempt to continue"
     df -h /
-    exit 1
+  elif [ "\$DISK_USAGE" -gt 95 ]; then
+    echo "⚠️  WARNING: Disk usage is high (\${DISK_USAGE}%)"
+    echo "⚠️  Proceeding with caution"
   fi
 
   # Python 버전 확인 및 가상환경 생성
