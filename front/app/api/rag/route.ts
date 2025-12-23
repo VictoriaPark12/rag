@@ -5,7 +5,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // 백엔드 URL 설정 (환경 변수 또는 fallback)
-    // 서버 사이드에서는 BACKEND_BASE_URL 사용 (NEXT_PUBLIC_ 불필요)
     const backendBaseUrl =
       process.env.BACKEND_BASE_URL ||
       "http://ec2-13-124-217-222.ap-northeast-2.compute.amazonaws.com:8000";
@@ -14,7 +13,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[API Route] Proxying to backend: ${backendUrl}`);
 
-    // EC2 백엔드로 프록시 요청 (서버에서 실행되므로 Mixed Content 문제 없음)
+    // EC2 백엔드로 프록시 요청
     const response = await fetch(backendUrl, {
       method: "POST",
       headers: {
