@@ -192,6 +192,63 @@ jobs:
             fi
           ENDSSH
 
+      - name: Restart Backend Service
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          DEPLOY_PATH: /opt/langchain
+        run: |
+          echo "🔄 Restarting backend service..."
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << ENDSSH
+            set -e
+            
+            echo "📊 Current service status:"
+            sudo systemctl status langchain-backend --no-pager -l | head -n 10 || true
+            
+            echo ""
+            echo "♻️  Restarting service..."
+            sudo systemctl restart langchain-backend
+            
+            echo "⏳ Waiting for service to start (10 seconds)..."
+            sleep 10
+            
+            if sudo systemctl is-active --quiet langchain-backend; then
+              echo "✅ Backend service restarted successfully"
+              echo ""
+              echo "📋 Service status:"
+              sudo systemctl status langchain-backend --no-pager -l | head -n 15
+              echo ""
+              echo "📋 Recent logs (last 20 lines):"
+              sudo journalctl -u langchain-backend --no-pager -n 20
+            else
+              echo "❌ Backend service restart failed"
+              echo ""
+              echo "📋 Error logs:"
+              sudo journalctl -u langchain-backend --no-pager -n 50
+              exit 1
+            fi
+            
+            echo ""
+            echo "🔌 Checking port 8000:"
+            PORT_CHECK=\$(sudo netstat -tlnp 2>/dev/null | grep :8000 || sudo ss -tlnp 2>/dev/null | grep :8000 || echo "")
+            if [ -z "\$PORT_CHECK" ]; then
+              echo "❌ Port 8000 is not bound"
+              exit 1
+            else
+              echo "✅ Port 8000 is in use:"
+              echo "\$PORT_CHECK"
+            fi
+            
+            echo ""
+            echo "🏥 Health check:"
+            HEALTH_RESPONSE=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+            if [ "\$HEALTH_RESPONSE" = "200" ]; then
+              echo "✅ Health check successful (HTTP \$HEALTH_RESPONSE)"
+            else
+              echo "⚠️  Health check response: HTTP \$HEALTH_RESPONSE"
+            fi
+          ENDSSH
+
       - name: Notify deployment status
         if: always()
         run: |
