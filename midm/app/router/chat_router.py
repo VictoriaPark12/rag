@@ -48,15 +48,26 @@ async def rag_query(request: QueryRequest, raw_request: Request) -> RAGResponse:
         RAG response with answer and retrieved documents.
     """
     request_id = getattr(getattr(raw_request, "state", None), "request_id", "-")
-    # Enforced QLoRA mode: this endpoint always uses chat_service QLoRA path.
-    base_model_path = os.getenv("QLORA_BASE_MODEL_PATH")
-    use_qlora = os.getenv("USE_QLORA", "0").lower() in {"1", "true", "yes"}
-    if not (use_qlora and base_model_path):
-        raise HTTPException(status_code=500, detail="QLoRA not configured")
-
+    
     try:
         if not vector_store:
             raise HTTPException(status_code=500, detail="Vector store not initialized")
+        
+        # Check if rag_chain is available (OpenAI or standard LLM mode)
+        # If rag_chain exists, use it; otherwise fall back to QLoRA
+        use_rag_chain = rag_chain is not None
+        use_qlora = False
+        base_model_path = None
+        
+        if not use_rag_chain:
+            # Fall back to QLoRA mode if rag_chain is not available
+            base_model_path = os.getenv("QLORA_BASE_MODEL_PATH")
+            use_qlora = os.getenv("USE_QLORA", "0").lower() in {"1", "true", "yes"}
+            if not (use_qlora and base_model_path):
+                raise HTTPException(
+                    status_code=500,
+                    detail="Neither RAG chain nor QLoRA is configured. Please set LLM_PROVIDER=openai or configure QLoRA."
+                )
 
         print(
             "[ROUTER] /rag received",
@@ -100,22 +111,50 @@ async def rag_query(request: QueryRequest, raw_request: Request) -> RAGResponse:
         # Format context from retrieved documents
         context = "\n\n".join(doc.page_content for doc in retrieved_docs)
 
-        # Generate answer using the model loaded in chat_service (QLoRA path).
-        adapter_path = os.getenv("QLORA_ADAPTER_PATH") or None
-        from service.chat_service import rag_chat_with_qlora  # type: ignore
+        # Generate answer using rag_chain (OpenAI/standard LLM) or QLoRA
+        if use_rag_chain:
+            # Use rag_chain (OpenAI or standard LLM mode)
+            print("[RAG] Using rag_chain for answer generation")
+            
+            # Build input for rag_chain
+            # rag_chain expects: {"question": str, "context": str, "history": list}
+            chain_input = {
+                "question": request.question,
+                "context": context,
+                "history": history,
+            }
+            
+            # Invoke rag_chain (supports both sync and async)
+            if hasattr(rag_chain, "ainvoke"):
+                chain_result = await rag_chain.ainvoke(chain_input)
+            elif hasattr(rag_chain, "invoke"):
+                chain_result = rag_chain.invoke(chain_input)
+            else:
+                chain_result = rag_chain(chain_input)
+            
+            # Extract answer from chain result
+            answer = str(getattr(chain_result, "content", chain_result)).strip()
+            logger.info(
+                "[RAG] id=%s backend=rag_chain answer_preview=%r", request_id, answer[:120]
+            )
+        else:
+            # Use QLoRA mode
+            print("[RAG] Using QLoRA for answer generation")
+            adapter_path = os.getenv("QLORA_ADAPTER_PATH") or None
+            from service.chat_service import rag_chat_with_qlora  # type: ignore
 
-        answer = rag_chat_with_qlora(
-            base_model_path=base_model_path,
-            adapter_path=adapter_path,
-            question=request.question,
-            context=context,
-            conversation_history=history,
-            max_new_tokens=int(os.getenv("QLORA_MAX_NEW_TOKENS", "256")),
-            request_id=request_id,
-        )
-        logger.info(
-            "[RAG] id=%s backend=qlora answer_preview=%r", request_id, answer[:120]
-        )
+            answer = rag_chat_with_qlora(
+                base_model_path=base_model_path,
+                adapter_path=adapter_path,
+                question=request.question,
+                context=context,
+                conversation_history=history,
+                max_new_tokens=int(os.getenv("QLORA_MAX_NEW_TOKENS", "256")),
+                request_id=request_id,
+            )
+            logger.info(
+                "[RAG] id=%s backend=qlora answer_preview=%r", request_id, answer[:120]
+            )
 
         # 답변 정제: 불필요한 텍스트 제거
         answer = answer.strip()
