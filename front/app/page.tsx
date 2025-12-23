@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { callRAGBackend } from "@/app/api/rag/backend";
-import { callChatBackend } from "@/app/api/chat/backend";
 
 interface RAGResponse {
   question: string;
@@ -61,25 +59,40 @@ export default function Home() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000);
 
-      // 유틸리티 함수를 사용하여 백엔드 직접 호출
-      let data: RAGResponse | ChatResponse;
-      
-      if (mode === "rag") {
-        console.log(`[CLIENT] Calling RAG backend`);
-        data = await callRAGBackend({
-          question: query,
-          k: 3,
-          conversation_history: conversationHistory,
-        });
-      } else {
-        console.log(`[CLIENT] Calling Chat backend`);
-        data = await callChatBackend({
-          message: query,
-          conversation_history: conversationHistory,
-        });
-      }
+      // Next.js API Route로 요청 (서버에서 백엔드로 프록시)
+      const apiEndpoint = mode === "rag" ? "/api/rag" : "/api/chat";
+      const requestBody = mode === "rag"
+        ? {
+            question: query,
+            k: 3,
+            conversation_history: conversationHistory,
+          }
+        : {
+            message: query,
+            conversation_history: conversationHistory,
+          };
+
+      console.log(`[CLIENT] Calling API route: ${apiEndpoint}`);
+
+      const res = await fetch(apiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
 
       clearTimeout(timeoutId);
+      console.log("Response status:", res.status);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: "Unknown error" }));
+        console.error("Error response:", errorData);
+        throw new Error(`HTTP error! status: ${res.status} - ${errorData.detail || "Unknown error"}`);
+      }
+
+      const data = await res.json();
       console.log("Success response:", data);
 
       if (mode === "rag") {
